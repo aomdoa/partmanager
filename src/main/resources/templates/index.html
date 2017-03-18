@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html>
+    <head>
+	    <meta charset="utf-8" />
+	    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+	    <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Part Manager - Index</title>
+        
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css" />
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap-theme.min.css" />
+        <link rel="stylesheet" href="https://cdn.datatables.net/1.10.0/css/jquery.dataTables.css" />
+        <link rel="stylesheet" href="https://cdn.datatables.net/plug-ins/be7019ee387/integration/bootstrap/3/dataTables.bootstrap.css" />
+        
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/js/bootstrap.min.js"></script>
+        <script src="https://cdn.datatables.net/1.10.0/js/jquery.dataTables.js"></script>
+        <script src="https://cdn.datatables.net/plug-ins/be7019ee387/integration/bootstrap/3/dataTables.bootstrap.js"></script>
+        <script src="js/helper.js"></script>
+        <script src="js/bootbox.min.js"></script>
+
+        <style> 
+        /*<![CDATA[*/
+        table.dataTable tbody td {
+            padding: 2px 10px;
+        }
+        
+        .dataTables_wrapper .dataTables_paginate .paginate_button {
+            padding: 0em 0.25em;
+        }
+        /*]]>*/
+        </style>
+                
+        <script>
+        /*<![CDATA[*/
+		
+		var selectedRow;
+		var selectedData;
+			
+		$(document).ready(function() {
+			var keywordManager = function(keywords) {
+				var keywordReferences = [];
+				var createWord = function(keyword) {
+					var deferred = new $.Deferred();
+					
+					$.ajax({
+						type: 'POST',
+						url: '/parts/api/keyword',
+						dataType: 'json',
+						contentType: 'application/json',
+						data: JSON.stringify({name: keyword})
+					}).complete(function (data) {
+						if(processDataResponse(data)) {
+							keywordReferences.push(data.getResponseHeader("Location"));
+						}
+						deferred.resolve();
+					});
+					
+					return deferred.promise();
+				};
+				
+				var deferred = new $.Deferred();
+				
+				if(keywords.length == 1 && keywords[0].length == 0) {
+					deferred.resolve([]);
+				} else {
+    				$.ajax({
+    					type: 'GET',
+    					url: '/parts/api/keyword/search/findByNames?name=' + keywords.join(','),
+    					contentType: 'application/json'
+    				}).complete(function(data) {
+    					if(processDataResponse(data)) {
+    						if(data.responseJSON._embedded) {
+        						for(var index in data.responseJSON._embedded.keywords) {
+        							var keyword = data.responseJSON._embedded.keywords[index];
+        							keywords.splice(keywords.indexOf(keyword.name), 1);
+        							keywordReferences.push(keyword._links.self.href);
+        						};
+    						}
+    						
+    						var createCalls = [];
+    						for(var index in keywords) {
+    							createCalls.push(createWord(keywords[index]));
+    						}
+    						
+    						$.when.apply($, createCalls).done(function() {
+    							deferred.resolve(keywordReferences);
+    						});
+    					}
+    				});
+				}
+				
+				return deferred.promise();
+			};
+			
+			$('#location').change(function() {
+				var options = $('#bin');
+				options.empty();
+				if($('#location').val().length == 0) {
+					$('#bin').prop('disabled', true);
+					$('#quantity').val('');
+					$('#quantity').prop('disabled', true);
+				} else {
+					$('#bin').prop('disabled', false);
+					$('#quantity').prop('disabled', false);
+					$.ajax({
+						type: 'GET',
+						url: '/parts/api/bin/search/findByExactLocation?location=' + encodeURIComponent($('#location').val()),
+						contentType: 'application/json'
+					}).complete(function(data) {
+						if(processDataResponse(data)) {
+							$.each(data.responseJSON._embedded.bins, function() {
+								options.append($("<option/>").val(this._links.self.href).text(this.bin));
+							});
+						}
+					});
+					$('#quantity').focus();
+				}
+			});
+			
+			var partsTable = $('#partsTable').DataTable({
+                processing: true,
+                serverSide: true,
+                iDisplayLength: 25,
+                ajax: function(data, callback, settings) {
+                	searchValue = data.search.value;
+                	if(searchValue) {
+                		if(searchValue.substr(0,4) == 'bin:') {
+                			var url = getDataUrl(data, '/parts/api/part/search/binSearch') + '&bin=' + encodeURIComponent(searchValue.substr(4));
+                		} else {
+                			var url = getDataUrl(data, '/parts/api/part/search/fullSearch') + '&keyword=' + encodeURIComponent(searchValue);
+                		}
+                	} else {
+                		var url = getDataUrl(data, '/parts/api/part');
+                	}
+                	var drawIndex = data.draw;
+                	$.ajax(url).success(function(data) {
+                		var results = {
+        					draw: drawIndex,
+        					recordsTotal: 0,
+        					recordsFiltered: 0,
+        					data: []	
+        				}
+
+        				var partCallbacks = [];
+        				if(data._embedded) {
+        					$.each(data._embedded.parts, function(index, dataItem) {
+                				dataItem['quantity'] = 0;
+                				results.data.push(dataItem);
+                				partCallbacks.push($.ajax(dataItem._links.quantities.href).success(function(data) {
+                					if(data._embedded) {
+                						for(var i=0; i<data._embedded.quantities.length; i++) {
+                							dataItem.quantity += data._embedded.quantities[i].quantity;
+                						}
+                					}
+                				}));
+        					});
+                			results.recordsTotal = data.page.totalElements;
+                			results.recordsFiltered = data.page.totalElements;
+                		}
+        				
+        				$.when.apply($, partCallbacks).done(function() {
+        					callback(results);
+						});
+                	});
+                },
+                columnDefs: [{ 
+                    	targets: 0,
+    					data: "mfgPartNumber",
+                        defaultContent: ''
+					},{
+						targets: 1,
+                       	data: "description",
+                      	defaultContent: ''
+                 	},{ 
+                 		targets: 2,
+                        data: "quantity",
+                        defaultContent: '',
+                        sortable: false	
+                 	}]
+            });
+
+			function selectRow(rowData) {
+				$.when(
+						$.ajax(rowData._links.footprint.href),
+						$.ajax(rowData._links.keywords.href),
+						$.ajax(rowData._links.quantities.href),
+						$.ajax(rowData._links.documents.href)
+				).then(function(footprint, keywords, quantities, documents) {
+					$('#iMfg').html(rowData.mfgPartNumber);
+					$('#iRetail').html(rowData.retailerPartNumber);
+					$('#iDesc').html(rowData.description);
+					if(footprint[0] && footprint[0].name) {
+						$('#iFootprint').html(footprint[0].name + ' <img style="height: 30px;" id="fImage" />');
+						$.ajax(footprint[0]._links.picture.href).complete(function(data) {
+							$('#fImage').attr('src', 'data:image/png;base64,' + data.responseJSON.data);
+						});
+						selectedData.footprintId = footprint[0]._links.self.href.match(/.+\/api\/footprint\/(\d+)/);
+					} else {
+						$('#iFootprint').html('');
+						selectedData.footprintId = 0;
+					}
+					
+					selectedData.words = [];
+					if(keywords[0] && keywords[0]._embedded && keywords[0]._embedded.keywords) {
+						for(var i=0;i<keywords[0]._embedded.keywords.length;i++) {
+							selectedData.words.push(keywords[0]._embedded.keywords[i].name);
+						}
+					}
+					$('#iKeywords').html(selectedData.words.join(', '));
+					
+					$('.quantityRow').remove();
+					selectedData.quantities = [];
+					if(quantities[0] && quantities[0]._embedded) {
+						$.each(quantities[0]._embedded.quantities, function(index, q) {
+							selectedData.quantities.push(q);
+							$.ajax(q._links.storage.href).success(function (data) {
+								$('#detailTable tr:last').after('<tr data-index="' + index + '" class="quantityRow"><td>' + data.location + ' ' + 
+										data.bin + '</td><td><span class="qValue">' + q.quantity + '</span>' + 
+										'<button style="margin-left: 8px; margin-right: 50px; float: right;" class="decreaseQ btn btn-default btn-xs"><span class="glyphicon glyphicon-arrow-down"></span></button>' +
+										'<button style="margin-left: 20px; float: right;" class="increaseQ btn btn-default btn-xs"><span class="glyphicon glyphicon-arrow-up"></span></button>' +
+										'</td></tr>');
+							});
+						});
+					}
+					
+					$('#documentList').empty();
+					selectedData.documents = [];
+					if(documents[0] && documents[0]._embedded) {
+						$.each(documents[0]._embedded.documents, function(index, d) {
+							selectedData.documents.push(d);
+							$('#documentList').append(
+									'<li style="margin-bottom: 4px;"><a href="/document?partDocumentId=' + d.id + '" title="' + d.name + '">' + d.description + '</a>' +
+									'<button data-index="' + index + '" style="margin-right: 50px; float: right;" class="removeDocument btn btn-default btn-xs"><span class="glyphicon glyphicon-remove"></span></button></li>');
+						});
+					}
+					
+					$('#btnEditPart').prop('disabled', false);
+					$('#btnDelPart').prop('disabled', false);
+					$('#btnAddQuantity').prop('disabled', false);
+					$('#btnClearQuantity').prop('disabled', false);
+					$('#btnAddDocument').prop('disabled', false);
+				});
+			}
+			
+			$('#partsTable tbody').on( 'click', 'tr', function () {
+				if(selectedRow) {
+					selectedRow.toggleClass('selected');
+				}
+				selectedRow = $(this);
+				selectedRow.toggleClass('selected');
+				selectedData = partsTable.row(selectedRow).data();
+				selectRow(selectedData);
+		    });
+
+			var operationMode;
+			$('#btnAddPart').on('click', function(e) {
+				operationMode = 'addPart';
+				$('#addNewForm').trigger('reset');
+				$('#addNewLabel').html("Add New Part");
+				$('#addNew').modal('toggle');
+			});
+
+			$('#btnEditPart').on('click', function(e) {
+				operationMode = 'editPart';
+				$('#addNewLabel').html("Edit Part");
+				$('#addNewForm').trigger('reset');
+				
+				$('#mfgPartNumber').val(selectedData.mfgPartNumber);
+				$('#description').val(selectedData.description);
+				$('#retailPartNum').val(selectedData.retailerPartNumber);
+				$('#footprint').val(selectedData.footprintId);
+				$('#keywords').val(selectedData.words.join(', '));
+				
+				$('#addNew').modal('toggle');
+			});
+			
+			$('#btnAddQuantity').on('click', function(e) {
+				operationMode = 'addQuantity';
+				$('#addQuantityForm').trigger('reset');
+				$('#location').trigger('change');
+				$('#addQuantity').modal('toggle');
+			});
+			
+			$('#btnClearQuantity').on('click', function(e) {
+				bootbox.confirm("Clear the part quantity?", function(result) {
+					if(result) {
+						var deletes = [];
+						$.each(selectedData.quantities, function(index, q) {
+							deletes.push($.ajax({
+								type: 'DELETE',
+								url: q._links.self.href
+							}));
+						});
+					}
+					$.when.apply($, deletes).then(function() {
+						$('#partsTable').DataTable().ajax.reload();
+						selectRow(selectedData);
+					});
+				});
+			});
+			
+			$('#btnSaveChange').on('click', function(e) {
+				if(operationMode == 'addPart') {
+    				var keywords = $('#keywords').val().split(',');
+    				$.when(keywordManager(keywords)).done(function(keywordReferences) {
+    					$.ajax({
+    						type: 'POST',
+    						url: '/parts/api/part',
+    						contentType: 'application/json',
+    						dataType: 'json',
+    						data: JSON.stringify({
+    							mfgPartNumber: $('#mfgPartNumber').val(),
+    							retailerPartNumber: $('#retailPartNum').val(),
+    							description: $('#description').val(),
+    							footprint: '/parts/api/bin/' + $('#footprint').val(),
+    							keywords: keywordReferences
+    						})
+    					}).complete(function(data) {
+    						if(processDataResponse(data)) {
+    	        				$.ajax({
+    	        					type: 'GET',
+    	        					url: data.getResponseHeader("Location"),
+    	        					contentType: 'application/json'
+    	        				}).complete(function(data) {
+    	        					selectedData = data.responseJSON;
+    	        					selectRow(selectedData);
+    	        					
+    	        					operationMode = 'addQuantity';
+    	        					$('#addQuantity').modal('toggle');
+    	        				});
+    	        				$('#partsTable').DataTable().ajax.reload();
+    							$('#addNew').modal('toggle');
+    						}
+    					});
+    				});
+				} else if(operationMode == 'editPart') {
+					var keywords = $('#keywords').val().split(',');
+    				$.when(keywordManager(keywords)).done(function(keywordReferences) {
+    					$.ajax({
+    						type: 'PATCH',
+    						url: selectedData._links.self.href,
+    						contentType: 'application/json',
+    						dataType: 'json',
+    						data: JSON.stringify({
+    							mfgPartNumber: $('#mfgPartNumber').val(),
+    							retailerPartNumber: $('#retailPartNum').val(),
+    							description: $('#description').val(),
+    							footprint: '/parts/api/bin/' + $('#footprint').val(),
+    							keywords: keywordReferences
+    						})
+    					}).complete(function(data) {
+    						if(processDataResponse(data)) {
+    							var index = selectedRow.index();
+    	        				$('#partsTable').DataTable().ajax.reload(function() {
+        							$('#partsTable tr').eq(index+2).trigger('click');
+    	        				});
+    							$('#addNew').modal('toggle');
+    						}
+    					});
+    				});
+				}
+			});
+			
+			$('#btnSaveAddQuantity').on('click', function(e) {
+				$.ajax({
+					type: 'POST',
+					url: '/parts/api/quantity',
+					contentType: 'application/json',
+					dataType: 'json',
+					data: JSON.stringify({
+						part: selectedData._links.self.href,
+						storage: $('#bin').val(),
+						quantity: $('#quantity').val()
+					})
+				}).complete(function(data) {
+					if(processDataResponse(data)) {
+						partsTable.ajax.reload();
+						$('#addQuantity').modal('toggle');
+						selectRow(selectedData);
+					}
+				});
+			});
+			
+			function qChange(tr, value) {
+				var index = tr.data('index');
+				var span = tr.find('.qValue');
+				if(selectedData.quantities[index].quantity + value < 0) {
+					return;
+				}
+				
+				$.ajax({
+					type: 'PATCH',
+					url: selectedData.quantities[index]._links.self.href,
+					contentType: 'application/json',
+					dataType: 'json',
+					data: JSON.stringify({quantity: selectedData.quantities[index].quantity + value})
+				}).complete(function(data) {
+					if(processDataResponse(data)) {
+						selectedData.quantities[index].quantity += value;
+						span.html(selectedData.quantities[index].quantity);
+					}
+				});
+			}
+			$('#detailTable').on('click', 'button.increaseQ', function(e) {
+				qChange($(this).closest('tr'), 1);
+			});
+			$('#detailTable').on('click', 'button.decreaseQ', function(e) {
+				qChange($(this).closest('tr'), -1);
+			});
+			
+			$('#btnDelPart').on('click', function(e) {
+				bootbox.confirm("Delete the part forever?", function(result) {
+					if(result) {
+						$.ajax({
+							type: 'DELETE',
+							url: selectedData._links.self.href
+						}).complete(function(data) {
+							selectedRow = null;
+							selectedData = null;
+							
+							$('#iMfg').html('');
+							$('#iRetail').html('');
+							$('#iDesc').html('');
+							$('#iFootprint').html('');
+							$('#iKeywords').html('');
+							$('.quantityRow').remove();
+							$('#btnEditPart').prop('disabled', true);
+							$('#btnDelPart').prop('disabled', true);
+							$('#btnAddQuantity').prop('disabled', true);
+							$('#btnClearQuantity').prop('disabled', true);
+							$('#btnAddDocument').prop('disabled', true);
+							$('#partsTable').DataTable().ajax.reload();
+						});
+					}
+				});
+			});
+			
+			$('#btnAddDocument').on('click', function(e) {
+				$('#addDocumentForm').trigger('reset');
+				$('#addDocument').modal('toggle');
+			});
+			
+			var name;
+        	var bytes;
+        	$('#document').change(function() {
+        		var input = this;
+        		if(input.files && input.files[0]) {
+					var fReader = new FileReader();
+					fReader.onloadend = function () {
+						var index = fReader.result.indexOf(',');
+						name = input.files[0].name;
+						bytes = fReader.result.substr(index+1);
+					}
+					fReader.readAsDataURL(input.files[0]);
+                }
+        	});
+        	
+			$('#btnSaveDocument').on('click', function(e) {
+				if($('#document')[0].files[0]) {
+        			$.ajax({
+        				type: "POST",
+        				url: "/parts/api/file",
+        				dataType: 'json',
+    	        		contentType: 'application/json',
+        				data: JSON.stringify({filename: name, data: bytes}),
+        				complete: function(data) {
+        					if(processDataResponse(data)) {
+        						var fileReference = data.getResponseHeader("Location");
+        						$.ajax({
+        							type: 'POST',
+        							url: '/parts/api/document',
+        							dataType: 'json',
+        							contentType: 'application/json',
+        							data: JSON.stringify({part: selectedData._links.self.href, name: name, description: $('#docDescription').val(), file: fileReference}),
+        							complete: function(data) {
+        								if(processDataResponse(data)) {
+        									selectRow(selectedData);
+        									$('#addDocument').modal('toggle');
+        								}
+        							}
+        						});
+        					}
+        				}
+        			});
+				}
+			});
+			
+			$('#detailTable').on('click', 'button.removeDocument', function(e) {
+				var index = $(this).data('index');
+				bootbox.confirm("Remove '" + selectedData.documents[index].name + "'?", function(result) {
+					$.ajax({
+						type: "DELETE",
+						url: selectedData.documents[index]._links.self.href,
+						complete: function(data) {
+							if(processDataResponse(data)) {
+								selectRow(selectedData);
+							}
+						}
+					});
+				});
+			});
+		});
+		/*]]>*/
+        </script>
+    </head>
+    <body>
+        <nav th:replace="fragments/layout :: header (index)"></nav>
+        <div class="container">
+            <div class="row">
+                <div class="col-md-8">
+                    <table id="partsTable" class="display" cellspacing="0">
+                        <thead>
+                            <tr>
+                                <th>Mfg Part #</th>
+                                <th>Description</th>
+                                <th>Quantity</th>
+                            </tr>
+                        </thead>
+                        <tfoot>
+                            <tr>
+                                <th>Mfg Part #</th>
+                                <th>Description</th>
+                                <th>Quantity</th>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                <div class="col-md-4">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <button id="btnAddPart" class="btn btn-primary btn-xs">Add Part</button>
+                        </div>
+                        <div class="col-md-6">
+                            <button id="btnEditPart" class="btn btn-default btn-xs" disabled="disabled">Edit Part</button>
+                            <button id="btnDelPart" class="btn btn-default btn-xs pull-right" disabled="disabled">Delete Part</button>
+                        </div>
+                    </div>
+                    <div style="padding-top: 10px;">
+                        <div class="panel panel-default">
+                            <div class="panel-heading">
+                                <h3 class="panel-title">Part Details</h3>
+                            </div>
+                            <table id="detailTable" class="table table-striped table-condensed">
+                                <colgroup>
+                                    <col style="width: 35%" />
+                                    <col style="width: 65%" />
+                                </colgroup>
+                                <tr>
+                                    <td><strong>Mfg #</strong></td>
+                                    <td id="iMfg"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Retail #</strong></td>
+                                    <td id="iRetail"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Description</strong></td>
+                                    <td id="iDesc"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Footprint</strong></td>
+                                    <td id="iFootprint"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Keywords</strong></td>
+                                    <td id="iKeywords"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Documents</strong></td>
+                                    <td>
+                                        <button disabled="disabled" id="btnAddDocument" style="float: right; margin-right: 45px;" class="btn btn-default btn-xs">Add</button>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td colspan="2" style="padding-left: 20px;">
+                                        <ul id="documentList" style="margin: 0px;"></ul>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Quantity</strong></td>
+                                    <td>
+                                        <button disabled="disabled" id="btnClearQuantity" style="float: right; margin-right: 30px;" class="btn btn-default btn-xs">Clear</button>
+                                        <button disabled="disabled" id="btnAddQuantity" style="float: right; margin-right: 10px;" class="btn btn-default btn-xs">Add</button>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+    
+        <div class="modal fade" id="addNew" tabindex="-1" role="dialog" aria-labelledby="addNewLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h4 class="modal-title" id="addNewLabel">Add New Part</h4>
+                    </div>
+                    <div class="modal-body">
+                        <form id="addNewForm" class="form-horizontal">
+                            <fieldset>
+                                <!-- Text input-->
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="mfgPartNumber">Manufacturer Part #</label>
+                                    <div class="col-md-8">
+                                        <input required="" id="mfgPartNumber" name="mfgPartNumber" type="text" class="form-control input-md" />
+                                    </div>
+                                </div>
+
+                                <!-- Text input-->
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="description">Description</label>
+                                    <div class="col-md-8">
+                                        <input id="description" name="description" type="text" class="form-control input-md" />
+
+                                    </div>
+                                </div>
+
+                                <!-- Text input-->
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="retailPartNum">Retailer Part Number</label>
+                                    <div class="col-md-8">
+                                        <input id="retailPartNum" name="retailPartNum" type="text" class="form-control input-md" />
+                                    </div>
+                                </div>
+
+                                <!-- Select Basic -->
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="footprint">Footprint</label>
+                                    <div class="col-md-4">
+                                        <select id="footprint" name="footprint" class="form-control">
+                                            <option th:each="footprint : ${footprints}" th:value="${footprint.id}" th:text="${footprint.name}"></option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- Text input-->
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="keywords">Keywords</label>
+                                    <div class="col-md-8">
+                                        <input id="keywords" name="keywords" type="text" class="form-control input-md" /> <span class="help-block">Comma Separated</span>
+                                    </div>
+                                </div>
+                            </fieldset>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-primary" id="btnSaveChange">Save changes</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="modal fade" id="addQuantity" tabindex="-1" role="dialog" aria-labelledby="addQuantityLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h4 class="modal-title" id="addQuantityLabel">Add Quantity</h4>
+                    </div>
+                    <div class="modal-body">
+                        <form id="addQuantityForm" class="form-horizontal">
+                            <fieldset>
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="location">Location</label>
+                                    <div class="col-md-4">
+                                        <select id="location" name="location" class="form-control">
+                                            <option value="">Select Location</option>
+                                            <option th:each="location : ${locations}" th:value="${location}" th:text="${location}"></option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="bin">Bin</label>
+                                    <div class="col-md-4">
+                                        <select id="bin" name="bin" class="form-control" disabled="disabled">
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="quantity">Quantity</label>
+                                    <div class="col-md-8">
+                                        <input id="quantity" name="quantity" type="text" class="form-control" disabled="disabled" />
+                                    </div>
+                                </div>
+                                
+                            </fieldset>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-primary" id="btnSaveAddQuantity">Save changes</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="modal fade" id="addDocument" tabindex="-1" role="dialog" aria-labelledby="addDocumentLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h4 class="modal-title" id="addDocumentLabel">Add Document</h4>
+                    </div>
+                    <div class="modal-body">
+                        <form id="addDocumentForm" class="form-horizontal">
+                            <fieldset>
+                                <!-- Text input-->
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="name">Description</label>
+                                    <div class="col-md-5">
+                                        <input id="docDescription" name="docDescription" type="text" placeholder="Document Description" class="form-control input-md" required="" />
+                                    </div>
+                                </div>
+                
+                                <!-- File Button -->
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="image">Document</label>
+                                    <div class="col-md-4">
+                                        <input id="document" name="document" class="input-file" type="file" />
+                                    </div>
+                                </div>
+                            </fieldset>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-primary" id="btnSaveDocument">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Part Manager - Part Bins</title>
+        
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css" />
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap-theme.min.css" />
+        <link rel="stylesheet" href="https://cdn.datatables.net/1.10.0/css/jquery.dataTables.css" />
+        <link rel="stylesheet" href="https://cdn.datatables.net/plug-ins/be7019ee387/integration/bootstrap/3/dataTables.bootstrap.css" />
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/js/bootstrap.min.js"></script>
+        <script src="https://cdn.datatables.net/1.10.0/js/jquery.dataTables.js"></script>
+        <script src="https://cdn.datatables.net/plug-ins/be7019ee387/integration/bootstrap/3/dataTables.bootstrap.js"></script>
+        <script src="js/bootbox.min.js"></script>
+        <script src="js/helper.js"></script>
+        
+        <script>
+        /*<![CDATA[*/
+        $(document).ready(function() {
+        	var searchValue;
+        	
+            $('#bins').dataTable({
+                processing: true,
+                serverSide: true,
+                ajax: function(data, callback, settings) {
+                	searchValue = data.search.value;
+                	if(searchValue) {
+                		var url = getDataUrl(data, '/parts/api/bin/search/findByPartialLocation') + '&location=' + encodeURIComponent(searchValue);
+                		$('#deleteButton').prop('disabled', false);
+                	} else {
+                		var url = getDataUrl(data, '/parts/api/bin');
+                		$('#deleteButton').prop('disabled', true);
+                	}
+                	var draw = data.draw;
+                	$.ajax(url).success(function(data) {
+                		callback(getData(data, draw, 'bins'));
+                	});
+                },
+                columnDefs: [
+                             { targets: 0,
+                               data: "bin",
+                               defaultContent: ''
+                             },
+                             { targets: 1,
+                               data: "location",
+                               defaultContent: ''
+                             },
+                             { targets: 2,
+              	               data: null,
+              	               defaultContent: '',
+              	           	   orderable: false
+              	             },
+                            ]
+                          
+            });
+            
+            $('#saveButton').on('click', function(e) {
+            	$.ajax({
+	        		type: 'POST',
+	        		url: '/bins',
+	        		data: $('#binForm').serialize(),
+	        		complete: function(data) {
+	        			if(processDataResponse(data)) {
+	        				$('#bins').DataTable().ajax.reload();
+	        				$('#addNew').modal('toggle');
+	        			}
+	        		}
+	        	});
+            });
+            
+            $('#deleteButton').on('click', function(e) {
+                bootbox.confirm("Delete all found bins?", function(result) {
+                	if(result) {
+    					$.ajax({
+    						type: 'DELETE',
+    						url: '/bins?location=' + searchValue,
+    						complete: function(data) {
+    							if(processDataResponse(data)) {
+    		        				$('#bins').DataTable().ajax.reload();
+    							}
+    						}
+    					});
+                	}
+                });
+            });
+        });
+        /*]]>*/
+        </script>
+    </head>
+    <body>
+        <nav th:replace="fragments/layout :: header(bins)"></nav>
+        <div class="container">
+            <table id="bins" class="display" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>Location</th>
+                        <th>Bin</th>
+                        <th>
+                            <button class="btn btn-primary btn-xs" data-toggle="modal" data-target="#addNew">Add Bins</button>
+                            <button class="btn btn-primary btn-xs" id="deleteButton" disabled="disabled">Delete Bins</button>
+                        </th>
+                    </tr>
+                </thead>
+                <tfoot>
+                    <tr>
+                        <th>Location</th>
+                        <th>Bin</th>
+                        <th></th>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        <div class="modal fade" id="addNew" tabindex="-1" role="dialog" aria-labelledby="addNewLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h4 class="modal-title" id="addNewLabel">Add Part Bin</h4>
+                    </div>
+                    <div class="modal-body">
+                        <form id="binForm" class="form-horizontal">
+                            <fieldset>
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="name">Location Name</label>
+                                    <div class="col-md-5">
+                                        <input id="location" name="location" type="text" placeholder="Bin Location Name" class="form-control input-md" required="" />
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="name">Bin Format</label>
+                                    <div class="col-md-5">
+                                        <input id="format" name="format" type="text" placeholder="000000" class="form-control input-md" required="" />
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="name"># Bins</label>
+                                    <div class="col-md-5">
+                                        <input id="numBins" name="numBins" type="text" class="form-control input-md" required="" />
+                                    </div>
+                                </div>
+                            </fieldset>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-primary" id="saveButton">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>

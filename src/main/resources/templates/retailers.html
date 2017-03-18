@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Part Manager - Retailers</title>
+        
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css" />
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap-theme.min.css" />
+        <link rel="stylesheet" href="https://cdn.datatables.net/1.10.0/css/jquery.dataTables.css" />
+        <link rel="stylesheet" href="https://cdn.datatables.net/plug-ins/be7019ee387/integration/bootstrap/3/dataTables.bootstrap.css" />
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/js/bootstrap.min.js"></script>
+        <script src="https://cdn.datatables.net/1.10.0/js/jquery.dataTables.js"></script>
+        <script src="https://cdn.datatables.net/plug-ins/be7019ee387/integration/bootstrap/3/dataTables.bootstrap.js"></script>
+        <script src="js/bootbox.min.js"></script>
+        <script src="js/helper.js"></script>
+        
+        <script>
+        /*<![CDATA[*/
+        $(document).ready(function() {
+        	var editData = null;
+        	
+            var rTable = $('#retailers').dataTable({
+            	lengthChange: false,
+            	searching: false,
+            	pageLength: 5,
+        		processing: true,
+                serverSide: true,
+                ajax: function(data, callback, settings) {
+                	processTableResults(data, callback, '/parts/api/retailer', 'retailers');
+                },
+            	columnDefs: [
+            	             { targets: 0,
+            	               data: "name",
+            	               defaultContent: ''
+            	             },
+            	             { targets: 1,
+            	               data: "url",
+            	               defaultContent: ''
+            	             },
+            	             { targets: 2,
+            	               data: "notes",
+            	               defaultContent: ''
+            	             },
+            	             { targets: 3,
+            	               data: null,
+            	               defaultContent: '<button type="button" class="btn-primary btn-xs editButton">Edit</button>',
+            	           	   orderable: false
+            	             },
+            	             { targets: 4,
+                               data: null,
+                               defaultContent: '<button type="button" class="btn-primary btn-xs deleteButton">Delete</button>',
+                               orderable: false
+                             }
+            	            ]
+            	          
+            });
+            
+            $('#saveButton').on('click', function(e) {
+            	if(editData) {
+            		var hType = 'PUT';
+            		var url = editData._links.self.href;
+            	} else {
+            		var hType = 'POST';
+            		var url = '/parts/api/retailer';
+            	}
+            	$.ajax({
+	        		type: hType,
+	        		dataType: 'json',
+	        		contentType: 'application/json',
+	        		url: url,
+	        		data: JSON.stringify({name: $('#name').val(), url: $('#url').val(), notes: $('#notes').val()}),
+	        		complete: function(data) {
+	        			if(processDataResponse(data)) {
+	        				$('#retailers').DataTable().ajax.reload();
+	        				$('#addNew').modal('toggle');
+	        			}
+	        		}
+	        	});
+            });
+            
+            $('#addNewButton').on('click', function(e) {
+            	e.preventDefault();
+            	$('#name').val('');
+                $('#url').val('');
+                $('#notes').val('');
+                editData = null;
+                $('#addNewLabel').html('Add Retailer');
+                $('#addNew').modal('toggle');
+            });
+            
+            $('#retailers').on('click', 'button.editButton', function(e) {
+            	e.preventDefault();
+            	var nRow = $(this).parents('tr')[0];            	
+            	editData = rTable.fnGetData(nRow);
+                $('#name').val(editData.name);
+                $('#url').val(editData.url);
+                $('#notes').val(editData.notes);
+                $('#addNewLabel').html('Edit Retailer');
+            	$('#addNew').modal('toggle');
+            });
+            
+            $('#retailers').on('click', "button.deleteButton", function (e) {
+                e.preventDefault();
+                var nRow = $(this).parents('tr')[0];
+                var aData = rTable.fnGetData(nRow);
+                
+                bootbox.confirm("Delete retailer?", function(result) {
+                	if(result && aData._links) {
+    	                $.ajax({
+    	                    type: "DELETE",
+    	                    dataType: 'json',
+    	                    contentType : 'application/json',
+    	                    url: aData._links.self.href
+    	                }).complete(function() {
+    	                	$('#retailers').DataTable().ajax.reload();
+    	                });
+                    }
+                });
+            });
+        });
+        /*]]>*/
+        </script>
+    </head>
+    <body>
+		<nav th:replace="fragments/layout :: header(retailers)"></nav>
+        <div class="container">
+			<table id="retailers" class="display" cellspacing="0">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>URL</th>
+						<th>Notes</th>
+						<th></th>
+						<th><button class="btn btn-primary btn-xs" id="addNewButton">Add New</button></th>
+					</tr>
+				</thead>
+				<tfoot>
+					<tr>
+						<th>Name</th>
+						<th>URL</th>
+						<th>Notes</th>
+						<th></th>
+						<th></th>
+					</tr>
+				</tfoot>
+			</table>
+        </div>
+        <div class="modal fade" id="addNew" tabindex="-1" role="dialog" aria-labelledby="addNewLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h4 class="modal-title" id="addNewLabel">Add Retailer</h4>
+                    </div>
+                    <div class="modal-body">
+                        <form id="retailerForm" class="form-horizontal">
+                            <fieldset>
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="name">Name</label>
+                                    <div class="col-md-5">
+                                        <input id="name" name="name" type="text" placeholder="Retailer Name" class="form-control input-md" required="" />
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="name">URL</label>
+                                    <div class="col-md-5">
+                                        <input id="url" name="url" type="text" placeholder="https://retailer.com" class="form-control input-md" required="" />
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label class="col-md-4 control-label" for="name">Notes</label>
+                                    <div class="col-md-5">
+                                        <input id="notes" name="notes" type="text" class="form-control input-md" />
+                                    </div>
+                                </div>
+                            </fieldset>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-primary" id="saveButton">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>

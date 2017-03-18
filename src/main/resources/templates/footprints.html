@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+    <head>
+	    <meta charset="utf-8" />
+	    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+	    <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Part Manager - Footprints</title>
+        
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css" />
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap-theme.min.css" />
+        <link rel="stylesheet" href="https://cdn.datatables.net/1.10.0/css/jquery.dataTables.css" />
+        <link rel="stylesheet" href="https://cdn.datatables.net/plug-ins/be7019ee387/integration/bootstrap/3/dataTables.bootstrap.css" />
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/js/bootstrap.min.js"></script>
+        <script src="https://cdn.datatables.net/1.10.0/js/jquery.dataTables.js"></script>
+        <script src="https://cdn.datatables.net/plug-ins/be7019ee387/integration/bootstrap/3/dataTables.bootstrap.js"></script>
+        <script src="js/helper.js"></script>
+        <script src="js/bootbox.min.js"></script>
+        
+        <script>
+        /*<![CDATA[*/
+        $(document).ready(function() {
+        	var name;
+        	var bytes;
+        	var fTable = $('#footprintTable').dataTable ({
+        		lengthChange: false,
+        		searching: false,
+        		pageLength: 5,
+        		processing: true,
+                serverSide: true,
+                ajax: function(data, callback, settings) {
+                	processTableResults(data, callback, '/parts/api/footprint', 'footprints');
+                },
+                columnDefs: [
+					{ 	targets: 0,
+						data: "name",
+						defaultContent: ''
+					},
+					{   targets: 1,
+						data: "_links.picture.href",
+						render: function(data, type, row) {
+							var name = 'img' + row.name;
+							$.ajax(data).complete(function(data) {
+								row.fileLink = data.responseJSON._links.self.href;
+								$('#' + name).attr('src', 'data:image/png;base64,' + data.responseJSON.data);
+							});
+							return '<img style="height: 50px;" id="' + name + '" />';
+						},
+						orderable: false
+					},{
+						targets: 2,
+						data: null,
+						defaultContent: '<button type="button" class="btn-primary btn-xs deleteButton">Delete</button>',
+						orderable: false
+					}]
+        	});
+        	
+        	$('#footprintTable').on('click', "button.deleteButton", function (e) {
+                e.preventDefault();
+                var nRow = $(this).parents('tr')[0];
+                var aData = fTable.fnGetData(nRow);
+                
+                bootbox.confirm("Delete footprint?", function(result) {
+                	if(result) {
+                    	$.ajax({
+    	                    type: "DELETE",
+    	                    dataType: 'json',
+    	                    contentType : 'application/json',
+    	                    url: aData._links.self.href
+    	                }).complete(function() {
+    	                	if(aData.fileLink) {
+                            	$.ajax({
+            	                	type: 'DELETE',
+            	                	dataType: 'json',
+            	                	contentType: 'application/json',
+            	                	url: aData.fileLink
+            	                });
+                        	}
+    	                	fTable.fnDeleteRow( nRow );
+    	                });
+                	}
+                });
+            });
+        	
+        	$('#image').change(function() {
+        		var input = this;
+        		if(input.files && input.files[0]) {
+					var fReader = new FileReader();
+					fReader.onloadend = function () {
+						var index = fReader.result.indexOf(',');
+						name = input.files[0].name;
+						bytes = fReader.result.substr(index+1);
+					}
+					fReader.readAsDataURL(input.files[0]);
+                }
+        	});
+        	
+        	$('#saveButton').on('click', function(e) {
+        		if($('#image')[0].files[0]) {
+        			$.ajax({
+        				type: "POST",
+        				url: "/parts/api/file",
+        				dataType: 'json',
+    	        		contentType: 'application/json',
+        				data: JSON.stringify({filename: name, data: bytes}),
+        				complete: function(data) {
+        					if(processDataResponse(data)) {
+        						var imageReference = data.getResponseHeader("Location");
+        						$.ajax({
+        							type: 'POST',
+        							url: '/parts/api/footprint',
+        							dataType: 'json',
+        							contentType: 'application/json',
+        							data: JSON.stringify({name: $('#name').val(), picture: imageReference}),
+        							complete: function(data) {
+        								if(processDataResponse(data)) {
+        									$('#footprintTable').DataTable().ajax.reload();
+        									$('#addNew').modal('toggle');
+        								}
+        							}
+        						});
+        					}
+        				}
+        			});
+        		}
+        		return true;
+        	});
+        });
+        /*]]>*/
+        </script>
+    </head>
+    <body>
+    	<nav th:replace="fragments/layout :: header(footprints)"></nav>
+    	<div class="container">
+    		<table id="footprintTable" class="display" cellspacing="0">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Image</th>
+                        <th><button class="btn btn-primary btn-xs" data-toggle="modal" data-target="#addNew">Add New</button></th>
+					</tr>
+				</thead>
+				<tfoot>
+					<tr>
+						<th>Name</th>
+						<th>Image</th>
+                        <th></th>
+					</tr>
+				</tfoot>
+			</table>
+			
+            <div class="modal fade" id="addNew" tabindex="-1" role="dialog" aria-labelledby="addNewLabel" aria-hidden="true">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h4 class="modal-title" id="addNewLabel">Add Footprint</h4>
+                        </div>
+                        <div class="modal-body">
+                            <form id="footprintForm" class="form-horizontal">
+                                <fieldset>
+                                    <!-- Text input-->
+                                    <div class="form-group">
+                                        <label class="col-md-4 control-label" for="name">Name</label>
+                                        <div class="col-md-5">
+                                            <input id="name" name="name" type="text" placeholder="Footprint Name" class="form-control input-md" required="" />
+                                        </div>
+                                    </div>
+                    
+                                    <!-- File Button -->
+                                    <div class="form-group">
+                                        <label class="col-md-4 control-label" for="image">Image</label>
+                                        <div class="col-md-4">
+                                            <input id="image" name="image" class="input-file" type="file" />
+                                        </div>
+                                    </div>
+                                </fieldset>
+                            </form>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                            <button type="button" class="btn btn-primary" id="saveButton">Save</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+    	</div>
+    </body>
+</html>
